@@ -1,26 +1,82 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Madraka player ships Tailwind class names inside its dist bundle. Without this, those
+ * utilities are never generated and controls look invisible outside fullscreen.
+ */
+@source "../../node_modules/@madraka/nextjs-videoplayer/dist/index.mjs";
 
+/* StreamVault / Netflix-style palette — ported from Vite `apps/frontend` */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  --color-sv-page: #141414;
+  --color-sv-card: #181818;
+  --color-sv-card-hover: #252525;
+  --color-sv-line: #2f2f2f;
+  --color-sv-ink: #ffffff;
+  --color-sv-muted: #b3b3b3;
+  --color-sv-dim: #757575;
+  --color-sv-accent: #e50914;
+  --color-sv-accent-hover: #f40612;
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.55);
+  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.65);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-sv-page);
+  color: var(--color-sv-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.hero-gradient {
+  background:
+    radial-gradient(ellipse 120% 80% at 80% 20%, rgba(229, 9, 20, 0.12), transparent 55%),
+    linear-gradient(180deg, #1f1f1f 0%, #181818 45%, #141414 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.row-mask {
+  mask-image: linear-gradient(to right, black 85%, transparent 100%);
+}
+
+/* Netflix-style horizontal rails: thin scrollbar, not aggressive edge fade */
+.sv-video-rail {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.sv-video-rail::-webkit-scrollbar {
+  height: 6px;
+}
+
+.sv-video-rail::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+}
+
+.sv-video-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*
+ * YouTube-style chrome hide: Madraka’s control bar is `absolute bottom-0 … z-30`.
+ * Parent sets [data-chrome-hidden="true"] from pointer idle while playing.
+ */
+.sv-player-stage[data-chrome-hidden="true"] div.absolute.bottom-0.left-0.right-0.z-30 {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
+
+.sv-player-stage div.absolute.bottom-0.left-0.right-0.z-30 {
+  transition: opacity 0.35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sv-player-stage[data-chrome-hidden="true"] div.absolute.bottom-0.left-0.right-0.z-30,
+  .sv-player-stage div.absolute.bottom-0.left-0.right-0.z-30 {
+    transition-duration: 0.01ms;
+  }
 }
