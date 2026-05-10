@@ -3,14 +3,27 @@
  */
 
 import { execFile } from "child_process";
+import { existsSync } from "fs";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 
+/** Systemd strips PATH; Ubuntu apt awscli installs to /usr/bin/aws. */
+function resolveAwsCli(): string {
+  const explicit = process.env.AWS_CLI_EXECUTABLE?.trim();
+  if (explicit && existsSync(explicit)) return explicit;
+  for (const p of ["/usr/local/bin/aws", "/usr/bin/aws"]) {
+    if (existsSync(p)) return p;
+  }
+  return "aws";
+}
+
+const awsBin = resolveAwsCli();
+
 function runAws(args: string[]): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
     execFile(
-      "aws",
+      awsBin,
       args,
       {
         encoding: "utf8",
