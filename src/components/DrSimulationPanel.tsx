@@ -4,6 +4,8 @@ import { useCallback, useEffect, startTransition, useState } from "react";
 
 type SimMode = "off" | "pre_disaster" | "disaster";
 
+type InfraResp = { ok?: boolean; error?: string; action?: string; route53Weights?: string };
+
 type SimResp = {
   ok: boolean;
   simulation?: {
@@ -52,11 +54,52 @@ export function DrSimulationPanel({ token }: { token: string }) {
     }
   }, [token]);
 
+  const infraAction = async (
+    action: string,
+  ): Promise<(InfraResp & { ok?: boolean; error?: string }) | null> => {
+    if (!token) return null;
+    const res = await fetch("/api/admin/demo-phase", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action }),
+    });
+    let body = {} as InfraResp & { ok?: boolean; error?: string };
+    try {
+      body = (await res.json()) as InfraResp & { ok?: boolean; error?: string };
+    } catch {
+      /* ignore */
+    }
+    if (!res.ok) {
+      return { ...body, ok: false, error: body.error ?? `demo-phase HTTP ${res.status}` };
+    }
+    return body;
+  };
+
   const applyMode = async (mode: SimMode) => {
     if (!token) return;
     setSetting(true);
     setErr(null);
     try {
+      if (mode === "pre_disaster") {
+        const i = await infraAction("pre_disaster");
+        if (!i?.ok) {
+          setErr(i?.error ?? "demo-phase pre_disaster failed");
+          setSetting(false);
+          return;
+        }
+      }
+      if (mode === "disaster") {
+        const i = await infraAction("disaster");
+        if (!i?.ok) {
+          setErr(i?.error ?? "demo-phase disaster failed");
+          setSetting(false);
+          return;
+        }
+      }
+
       const res = await fetch("/api/admin/simulate-load", {
         method: "POST",
         headers: {
@@ -68,11 +111,34 @@ export function DrSimulationPanel({ token }: { token: string }) {
       const body = (await res.json()) as SimResp & { appliedMode?: string };
       if (!res.ok || !body.ok) {
         setErr((body as { error?: string }).error ?? res.statusText);
+        setSetting(false);
         return;
       }
       setData(body);
+      if (mode === "off") {
+        const fb = await infraAction("failback");
+        if (!fb?.ok) {
+          setErr(fb?.error ?? "demo-phase failback failed");
+        }
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "POST simulate-load failed");
+    } finally {
+      setSetting(false);
+    }
+  };
+
+  const runInfrastructure = async (action: "failback" | "normalize") => {
+    if (!token) return;
+    setSetting(true);
+    setErr(null);
+    try {
+      const i = await infraAction(action);
+      if (!i?.ok) {
+        setErr(i?.error ?? `demo-phase ${action} failed`);
+        return;
+      }
+      await poll();
     } finally {
       setSetting(false);
     }
@@ -98,10 +164,13 @@ export function DrSimulationPanel({ token }: { token: string }) {
     <section className="border-sv-line space-y-4 rounded-xl border p-5 md:p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sv-muted text-sm uppercase tracking-wider">DR demo (primary only)</p>
-          <h2 className="text-sv-ink mt-1 text-lg font-semibold">CPU stress controls</h2>
+          <p className="text-sv-muted text-sm uppercase tracking-wider">DR demo (primary admin only)</p>
+          <h2 className="text-sv-ink mt-1 text-lg font-semibold">Classroom storyline</h2>
           <p className="text-sv-muted mt-2 max-w-2xl text-sm">
-            Applies only on the primary app EC2 · warm / failback / DR cold — tell the story in AWS Console.
+            Pre‑disaster + disaster buttons first call AWS (<code className="font-mono text-[11px]">/api/admin/demo-phase</code>)
+            — start/warm DR EC2, shift Route53 weights, optional Lambda — then ramp CPU. High CPU metrics alone do{" "}
+            <span className="text-sv-ink font-medium">not</span> auto‑failover unless you enable predictive DR in
+            Terraform. Clearing load also kicks failback DNS; use “cold DR” when the story is finished.
           </p>
         </div>
         <button
@@ -144,7 +213,40 @@ export function DrSimulationPanel({ token }: { token: string }) {
           onClick={() => void applyMode("off")}
           className="border-sv-line text-sv-muted hover:text-sv-ink rounded-lg border px-4 py-2.5 text-sm font-semibold transition hover:bg-white/5 disabled:opacity-50"
         >
-          Clear
+          Clear load + Route53 → primary
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-3 border-t border-white/5 pt-4">
+        <button
+          type="button"
+          disabled={setting}
+          onClick={() => void (async () => {
+            setSetting(true);
+            setErr(null);
+            const i = await infraAction("baseline");
+            setSetting(false);
+            if (!i?.ok) setErr(i?.error ?? "baseline failed");
+            else await poll();
+          })()}
+          className="border-sv-line text-sv-dim hover:text-sv-ink rounded-lg border px-3 py-2 text-xs font-semibold"
+        >
+          Infra baseline (neutral DNS + cold DR EC2 stop)
+        </button>
+        <button
+          type="button"
+          disabled={setting}
+          onClick={() => void runInfrastructure("failback")}
+          className="border-sv-line text-sv-dim hover:text-sv-ink rounded-lg border px-3 py-2 text-xs font-semibold"
+        >
+          Route53 failback heavy-primary
+        </button>
+        <button
+          type="button"
+          disabled={setting}
+          onClick={() => void runInfrastructure("normalize")}
+          className="border-sv-line text-sv-dim hover:text-sv-ink rounded-lg border px-3 py-2 text-xs font-semibold"
+        >
+          Cold standby (neutral DNS + stop DR)
         </button>
       </div>
       {setting ? <p className="text-sv-dim text-xs">Applying…</p> : null}
