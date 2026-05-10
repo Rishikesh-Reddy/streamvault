@@ -16,9 +16,13 @@ export type Ec2DashboardData = {
   networkOutBytes: MetricPoint[];
   diskReadBytes?: MetricPoint[];
   diskWriteBytes?: MetricPoint[];
-  /** Latest averages / sums for header cards */
+  /** Latest averages / sums for header cards (EC2 namespace; 5-minute periods unless detailed monitoring) */
   summary: {
     cpuLatest: number | null;
+    /** ISO timestamp of the cpuLatest bucket (CloudWatch period end alignment) */
+    cpuLatestAt: string | null;
+    /** Max CPU % in the selected time window (highlights spikes that "latest" may miss) */
+    cpuPeakInWindow: number | null;
     networkInLast5mAvgBytes: number | null;
     networkOutLast5mAvgBytes: number | null;
   };
@@ -119,6 +123,15 @@ function clientRegion(): string {
 
 function dimension(instanceId: string) {
   return [{ Name: "InstanceId" as const, Value: instanceId }];
+}
+
+function sortMetricPoints(points: MetricPoint[]): MetricPoint[] {
+  return [...points].sort((a, b) => a.t.localeCompare(b.t));
+}
+
+function seriesMax(points: MetricPoint[]): number | null {
+  if (!points.length) return null;
+  return Math.max(...points.map((p) => p.v));
 }
 
 /** One batched CloudWatch call — default EC2 namespace (no custom metrics cost). */
@@ -253,13 +266,14 @@ export async function fetchEc2Dashboard(opts: {
       "No CloudWatch points returned. Enable detailed monitoring or wait for data; check IAM (cloudwatch:GetMetricData) and instance ID.";
   }
 
-  const cpu = series("cpu");
-  const networkInBytes = series("netin");
-  const networkOutBytes = series("netout");
-  const diskReadBytes = series("dread");
-  const diskWriteBytes = series("dwrite");
+  const cpu = sortMetricPoints(series("cpu"));
+  const networkInBytes = sortMetricPoints(series("netin"));
+  const networkOutBytes = sortMetricPoints(series("netout"));
+  const diskReadBytes = sortMetricPoints(series("dread"));
+  const diskWriteBytes = sortMetricPoints(series("dwrite"));
 
-  const last = (arr: MetricPoint[]) => (arr.length ? arr[arr.length - 1].v : null);
+  const lastVal = (arr: MetricPoint[]) => (arr.length ? arr[arr.length - 1].v : null);
+  const lastTime = (arr: MetricPoint[]) => (arr.length ? arr[arr.length - 1].t : null);
 
   return {
     instanceId,
@@ -275,9 +289,11 @@ export async function fetchEc2Dashboard(opts: {
     diskReadBytes: diskReadBytes.length ? diskReadBytes : undefined,
     diskWriteBytes: diskWriteBytes.length ? diskWriteBytes : undefined,
     summary: {
-      cpuLatest: last(cpu),
-      networkInLast5mAvgBytes: last(networkInBytes),
-      networkOutLast5mAvgBytes: last(networkOutBytes),
+      cpuLatest: lastVal(cpu),
+      cpuLatestAt: lastTime(cpu),
+      cpuPeakInWindow: seriesMax(cpu),
+      networkInLast5mAvgBytes: lastVal(networkInBytes),
+      networkOutLast5mAvgBytes: lastVal(networkOutBytes),
     },
   };
 }

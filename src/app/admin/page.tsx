@@ -24,6 +24,8 @@ type Dashboard = {
   diskWriteBytes?: MetricPoint[];
   summary: {
     cpuLatest: number | null;
+    cpuLatestAt: string | null;
+    cpuPeakInWindow: number | null;
     networkInLast5mAvgBytes: number | null;
     networkOutLast5mAvgBytes: number | null;
   };
@@ -255,6 +257,14 @@ export default function AdminDashboardPage() {
           </div>
         </div>
         {error && <p className="text-sm text-amber-300">{error}</p>}
+        <p className="text-sv-dim max-w-3xl text-xs leading-relaxed">
+          Values come from CloudWatch <code className="font-mono text-[11px]">AWS/EC2</code> using{" "}
+          <strong>5‑minute</strong> periods (standard monitoring). The headline number is the{" "}
+          <strong>latest completed bucket’s average</strong>, so it often looks idle right after you stop
+          stress even when <code className="font-mono text-[11px]">top</code> briefly showed ~100%. Compare
+          with peak in the selected window and your CLI <code className="font-mono text-[11px]">get-metric-statistics</code>{" "}
+          output.
+        </p>
       </section>
 
       <DrSimulationPanel token={token} />
@@ -263,10 +273,23 @@ export default function AdminDashboardPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="border-sv-line bg-sv-card rounded-xl border p-4">
-              <p className="text-sv-dim text-xs uppercase">CPU (latest)</p>
+              <p className="text-sv-dim text-xs uppercase">CPU (CloudWatch)</p>
               <p className="text-sv-ink mt-1 text-2xl font-bold">
                 {d.summary.cpuLatest !== null ? `${d.summary.cpuLatest.toFixed(1)}%` : "—"}
               </p>
+              {d.summary.cpuPeakInWindow !== null && (
+                <p className="text-sv-muted mt-2 text-sm">
+                  Peak in selected window:{" "}
+                  <span className="text-sv-ink font-semibold">
+                    {d.summary.cpuPeakInWindow.toFixed(1)}%
+                  </span>
+                </p>
+              )}
+              {d.summary.cpuLatestAt && (
+                <p className="text-sv-dim mt-1 text-xs">
+                  CloudWatch timestamp: {new Date(d.summary.cpuLatestAt).toLocaleString()}
+                </p>
+              )}
             </div>
             <div className="border-sv-line bg-sv-card rounded-xl border p-4">
               <p className="text-sv-dim text-xs uppercase">Network in (last period)</p>
