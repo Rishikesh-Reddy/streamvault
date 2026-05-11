@@ -47,7 +47,7 @@ function envForAwsCli(): NodeJS.ProcessEnv {
   return env;
 }
 
-function runAws(args: string[]): Promise<{ stdout: string }> {
+function runAws(args: readonly string[]): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
     const bin = resolveAwsCli();
     execFile(
