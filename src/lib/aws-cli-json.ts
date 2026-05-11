@@ -41,6 +41,9 @@ function envForAwsCli(): NodeJS.ProcessEnv {
   ]) {
     stripIfBlank(k);
   }
+  // CLI v1 (Ubuntu `awscli` package) does not support `--no-cli-pager` (v2-only). Disabling
+  // the pager via env works for v1 and v2 and avoids blocking on `less` under execFile.
+  env.AWS_PAGER = "";
   return env;
 }
 
@@ -68,7 +71,7 @@ function runAws(args: string[]): Promise<{ stdout: string }> {
 
 /** Args after `aws`, e.g. ["ssm", "get-parameter", "--name", "/x"]. */
 export async function awsCliJson<T>(segments: readonly string[]): Promise<T> {
-  const { stdout } = await runAws([...segments, "--output", "json", "--no-cli-pager"]);
+  const { stdout } = await runAws([...segments, "--output", "json"]);
   const trimmed = stdout.trim();
   try {
     return JSON.parse(trimmed) as T;
@@ -79,7 +82,7 @@ export async function awsCliJson<T>(segments: readonly string[]): Promise<T> {
 }
 
 export async function awsCliQuiet(segments: readonly string[]): Promise<void> {
-  await runAws([...segments, "--no-cli-pager"]);
+  await runAws(segments);
 }
 
 export async function writeTempJsonFile(obj: unknown): Promise<string> {
