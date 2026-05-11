@@ -18,17 +18,42 @@ function resolveAwsCli(): string {
   return "aws";
 }
 
-const awsBin = resolveAwsCli();
+/**
+ * Next/dotenv often sets AWS_* keys to empty strings. The CLI credential chain
+ * treats those as "use env provider" and fails on EC2 instead of falling through
+ * to the instance role (while `aws` in a minimal shell env still works).
+ */
+function envForAwsCli(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const stripIfBlank = (k: string) => {
+    const v = env[k];
+    if (v !== undefined && String(v).trim() === "") delete env[k];
+  };
+  for (const k of [
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_SECURITY_TOKEN",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+  ]) {
+    stripIfBlank(k);
+  }
+  return env;
+}
 
 function runAws(args: string[]): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
+    const bin = resolveAwsCli();
     execFile(
-      awsBin,
+      bin,
       args,
       {
         encoding: "utf8",
         maxBuffer: 32 * 1024 * 1024,
-        env: { ...process.env },
+        env: envForAwsCli(),
       },
       (err, stdout, stderr) => {
         if (err) {
@@ -44,7 +69,13 @@ function runAws(args: string[]): Promise<{ stdout: string }> {
 /** Args after `aws`, e.g. ["ssm", "get-parameter", "--name", "/x"]. */
 export async function awsCliJson<T>(segments: readonly string[]): Promise<T> {
   const { stdout } = await runAws([...segments, "--output", "json", "--no-cli-pager"]);
-  return JSON.parse(stdout) as T;
+  const trimmed = stdout.trim();
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`AWS CLI JSON parse failed (${msg}). stdout (first 240 chars): ${trimmed.slice(0, 240)}`);
+  }
 }
 
 export async function awsCliQuiet(segments: readonly string[]): Promise<void> {

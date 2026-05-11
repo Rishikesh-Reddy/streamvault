@@ -205,9 +205,21 @@ async function invokePredictive(region: string, name: string) {
 export async function POST(req: Request) {
   try {
     await awsCliJson(["sts", "get-caller-identity"]);
-  } catch {
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException & { stderr?: string };
+    console.error("[demo-phase] STS probe failed:", err.code ?? "(no code)", err.message, err.stderr ?? "");
+    const stderr = err.stderr?.trim();
+    const hint =
+      err.code === "ENOENT"
+        ? "Binary not found (ENOENT). Install awscli or set AWS_CLI_EXECUTABLE=/usr/bin/aws in the streamvault service env."
+        : stderr
+          ? stderr.slice(0, 400)
+          : err.message || String(e);
     return NextResponse.json(
-      { ok: false, error: "AWS CLI unreachable (install awscli + grant instance role)." },
+      {
+        ok: false,
+        error: `AWS CLI unreachable (install awscli + grant instance role). Detail: ${hint}`,
+      },
       { status: 503 },
     );
   }
