@@ -33,7 +33,7 @@ export function DrSimulationPanel({ token }: { token: string }) {
   const [manualFailoverDnsOn, setManualFailoverDnsOn] = useState<boolean | null>(null);
   const [manualFailoverDnsLoading, setManualFailoverDnsLoading] = useState(false);
   const [manualFailoverDnsSaving, setManualFailoverDnsSaving] = useState(false);
-  /** null = unknown; deployed false = no Lambda lab; true + enabled = predictive auto-failover toggle */
+  /** null = unknown; deployed false = no predictive Lambda; true + enabled = toggle state */
   const [predictiveToggle, setPredictiveToggle] = useState<
     null | { deployed: false } | { deployed: true; enabled: boolean | null }
   >(null);
@@ -280,14 +280,7 @@ export function DrSimulationPanel({ token }: { token: string }) {
   return (
     <section className="border-sv-line space-y-4 rounded-xl border p-5 md:p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sv-muted text-sm uppercase tracking-wider">DR demo (primary admin only)</p>
-          <h2 className="text-sv-ink mt-1 text-lg font-semibold">Classroom storyline</h2>
-          <p className="text-sv-muted mt-2 max-w-2xl text-sm">
-            Follow the storyline: simulate stress, run the failure steps, then return to normal. Use the two switches below to
-            pause admin-driven DNS changes or scheduled predictive failover independently.
-          </p>
-        </div>
+        <h2 className="text-sv-ink text-lg font-semibold">Failover</h2>
         <button
           type="button"
           onClick={() => {
@@ -311,11 +304,7 @@ export function DrSimulationPanel({ token }: { token: string }) {
 
       <div className="border-sv-line flex flex-wrap items-start justify-between gap-4 rounded-lg border bg-black/20 px-3 py-3">
         <div className="min-w-0 max-w-xl">
-          <p className="text-sv-ink text-sm font-medium">Manual traffic failover</p>
-          <p className="text-sv-dim mt-1 text-xs leading-relaxed">
-            Controls whether storyline steps can steer viewer traffic. When disabled, standby servers may still start, but
-            routing stays as-is unless something else manages it.
-          </p>
+          <p className="text-sv-ink text-sm font-medium">Manual routing</p>
         </div>
         <label className="text-sv-muted flex shrink-0 cursor-pointer items-center gap-2.5 pt-1 text-sm">
           <span className="select-none">
@@ -343,16 +332,9 @@ export function DrSimulationPanel({ token }: { token: string }) {
 
       <div className="border-sv-line flex flex-wrap items-start justify-between gap-4 rounded-lg border bg-black/20 px-3 py-3">
         <div className="min-w-0 max-w-xl">
-          <p className="text-sv-ink text-sm font-medium">Predictive traffic failover</p>
-          <p className="text-sv-dim mt-1 text-xs leading-relaxed">
-            When on, the scheduled DR Lambda may shift viewer traffic when primary CPU or the SageMaker signal crosses the
-            lab thresholds—and returns to normal Terraform weights automatically when metrics look healthy again. Turn off here
-            to freeze automatic shifts (running the Lambda restore path if it had shifted).
-          </p>
+          <p className="text-sv-ink text-sm font-medium">Automatic routing</p>
           {predictiveToggle?.deployed === false ? (
-            <p className="text-sv-muted mt-2 text-[11px] leading-relaxed">
-              Not deployed: enable predictive DR in Terraform and rebuild the primary app instance so STREAMVAULT_DEMO_PREDICTIVE_LAMBDA is set.
-            </p>
+            <p className="text-sv-muted mt-1 text-xs">Not available on this deployment.</p>
           ) : null}
         </div>
         <label className="text-sv-muted flex shrink-0 cursor-pointer items-center gap-2.5 pt-1 text-sm">
