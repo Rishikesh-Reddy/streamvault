@@ -33,6 +33,12 @@ export function DrSimulationPanel({ token }: { token: string }) {
   const [manualFailoverDnsOn, setManualFailoverDnsOn] = useState<boolean | null>(null);
   const [manualFailoverDnsLoading, setManualFailoverDnsLoading] = useState(false);
   const [manualFailoverDnsSaving, setManualFailoverDnsSaving] = useState(false);
+  /** null = unknown; deployed false = no Lambda lab; true + enabled = predictive auto-failover toggle */
+  const [predictiveToggle, setPredictiveToggle] = useState<
+    null | { deployed: false } | { deployed: true; enabled: boolean | null }
+  >(null);
+  const [predictiveLoading, setPredictiveLoading] = useState(false);
+  const [predictiveSaving, setPredictiveSaving] = useState(false);
 
   const poll = useCallback(async () => {
     if (!token) return;
@@ -78,6 +84,62 @@ export function DrSimulationPanel({ token }: { token: string }) {
       setManualFailoverDnsLoading(false);
     }
   }, [token]);
+
+  const loadPredictiveDrToggle = useCallback(async () => {
+    if (!token) return;
+    setPredictiveLoading(true);
+    try {
+      const res = await fetch("/api/admin/predictive-dr-failover", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const body = (await res.json()) as {
+        ok?: boolean;
+        predictiveLabDeployed?: boolean;
+        enabled?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !body?.ok) {
+        setPredictiveToggle({ deployed: false });
+        return;
+      }
+      if (body.predictiveLabDeployed !== true) {
+        setPredictiveToggle({ deployed: false });
+        return;
+      }
+      setPredictiveToggle({ deployed: true, enabled: typeof body.enabled === "boolean" ? body.enabled : null });
+    } catch {
+      setPredictiveToggle({ deployed: false });
+    } finally {
+      setPredictiveLoading(false);
+    }
+  }, [token]);
+
+  const persistPredictiveDrToggle = async (enabled: boolean) => {
+    if (!token) return;
+    setPredictiveSaving(true);
+    try {
+      const res = await fetch("/api/admin/predictive-dr-failover", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled }),
+      });
+      const body = (await res.json()) as { ok?: boolean; enabled?: boolean; error?: string };
+      if (!res.ok || !body?.ok || typeof body.enabled !== "boolean") {
+        setErr(body.error ?? `Could not save predictive setting (HTTP ${res.status})`);
+        return;
+      }
+      setPredictiveToggle({ deployed: true, enabled: body.enabled });
+      setErr(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Predictive save failed");
+    } finally {
+      setPredictiveSaving(false);
+    }
+  };
 
   const persistManualFailoverDnsToggle = async (enabled: boolean) => {
     if (!token) return;
@@ -199,15 +261,17 @@ export function DrSimulationPanel({ token }: { token: string }) {
     startTransition(() => {
       void poll();
       void loadManualFailoverDnsToggle();
+      void loadPredictiveDrToggle();
     });
     const id = window.setInterval(() => {
       startTransition(() => {
         void poll();
         void loadManualFailoverDnsToggle();
+        void loadPredictiveDrToggle();
       });
     }, 8000);
     return () => clearInterval(id);
-  }, [poll, loadManualFailoverDnsToggle]);
+  }, [poll, loadManualFailoverDnsToggle, loadPredictiveDrToggle]);
 
   const s = data?.simulation;
   /** Until first snapshot, defer stress buttons except Clear (handles stray workers). */
@@ -220,9 +284,8 @@ export function DrSimulationPanel({ token }: { token: string }) {
           <p className="text-sv-muted text-sm uppercase tracking-wider">DR demo (primary admin only)</p>
           <h2 className="text-sv-ink mt-1 text-lg font-semibold">Classroom storyline</h2>
           <p className="text-sv-muted mt-2 max-w-2xl text-sm">
-            Follow the storyline: simulate stress, run the failure steps, then return to normal. Turn off{' '}
-            <strong className="text-sv-muted font-medium">traffic failover</strong> below if routing should stay unchanged
-            (for example during an automated failover demo).
+            Follow the storyline: simulate stress, run the failure steps, then return to normal. Use the two switches below to
+            pause admin-driven DNS changes or scheduled predictive failover independently.
           </p>
         </div>
         <button
@@ -230,11 +293,12 @@ export function DrSimulationPanel({ token }: { token: string }) {
           onClick={() => {
             void poll();
             void loadManualFailoverDnsToggle();
+            void loadPredictiveDrToggle();
           }}
-          disabled={loading || manualFailoverDnsLoading}
+          disabled={loading || manualFailoverDnsLoading || predictiveLoading}
           className="border-sv-line text-sv-ink hover:bg-white/5 shrink-0 rounded border px-4 py-2 text-sm transition disabled:opacity-50"
         >
-          {loading || manualFailoverDnsLoading ? "Refreshing…" : "Refresh"}
+          {loading || manualFailoverDnsLoading || predictiveLoading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
@@ -271,6 +335,52 @@ export function DrSimulationPanel({ token }: { token: string }) {
             onChange={(e) =>
               startTransition(() => {
                 void persistManualFailoverDnsToggle(e.target.checked);
+              })
+            }
+          />
+        </label>
+      </div>
+
+      <div className="border-sv-line flex flex-wrap items-start justify-between gap-4 rounded-lg border bg-black/20 px-3 py-3">
+        <div className="min-w-0 max-w-xl">
+          <p className="text-sv-ink text-sm font-medium">Predictive traffic failover</p>
+          <p className="text-sv-dim mt-1 text-xs leading-relaxed">
+            When on, the scheduled DR Lambda may shift viewer traffic when primary CPU or the SageMaker signal crosses the
+            lab thresholds—and returns to normal Terraform weights automatically when metrics look healthy again. Turn off here
+            to freeze automatic shifts (running the Lambda restore path if it had shifted).
+          </p>
+          {predictiveToggle?.deployed === false ? (
+            <p className="text-sv-muted mt-2 text-[11px] leading-relaxed">
+              Not deployed: enable predictive DR in Terraform and rebuild the primary app instance so STREAMVAULT_DEMO_PREDICTIVE_LAMBDA is set.
+            </p>
+          ) : null}
+        </div>
+        <label className="text-sv-muted flex shrink-0 cursor-pointer items-center gap-2.5 pt-1 text-sm">
+          <span className="select-none">
+            {predictiveSaving
+              ? "Saving…"
+              : predictiveLoading || predictiveToggle === null || predictiveToggle.deployed !== true
+                ? predictiveToggle?.deployed === false
+                  ? "N/A"
+                  : "Checking…"
+                : predictiveToggle.enabled
+                  ? "Automatic on"
+                  : "Automatic off"}
+          </span>
+          <input
+            type="checkbox"
+            className="border-sv-line text-amber-500 focus:ring-amber-500/40 h-4 w-4 rounded border bg-black/40"
+            checked={predictiveToggle?.deployed === true && predictiveToggle.enabled === true}
+            disabled={
+              predictiveSaving ||
+              predictiveLoading ||
+              predictiveToggle === null ||
+              predictiveToggle.deployed !== true ||
+              predictiveToggle.enabled === null
+            }
+            onChange={(e) =>
+              startTransition(() => {
+                void persistPredictiveDrToggle(e.target.checked);
               })
             }
           />

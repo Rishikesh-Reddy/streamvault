@@ -15,3 +15,8 @@ export function parseManualRoute53DrToggle(raw: string | undefined | null): bool
 export function manualRoute53DrFromAdminEnabled(): boolean {
   return parseManualRoute53DrToggle(process.env.STREAMVAULT_MANUAL_ROUTE53_DR_ENABLED);
 }
+
+/** Scheduled predictive DR Lambda respects SSM; env fallback before first apply (STREAMVAULT_PREDICTIVE_DR_FAILOVER_ENABLED). */
+export function predictiveDrFailoverFromEnv(): boolean {
+  return parseManualRoute53DrToggle(process.env.STREAMVAULT_PREDICTIVE_DR_FAILOVER_ENABLED);
+}
