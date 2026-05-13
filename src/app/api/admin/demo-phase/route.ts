@@ -11,6 +11,7 @@ import {
   cpuStressSimulationAllowed,
   declaredTrafficTier,
 } from "@/lib/cpu-load-simulator";
+import { resolveManualRoute53DrFromAdmin } from "@/lib/manual-route53-dr-resolve";
 import { userFromRequest } from "@/lib/request-user";
 import * as fs from "fs/promises";
 import * as os from "os";
@@ -178,6 +179,35 @@ function aliasChange(peer: PeerFacts, priW: number, secW: number) {
   };
 }
 
+/** Route53 failover from admin demo; no-op when dashboard toggle / SSM / env disables manual DNS updates. */
+async function demoRoute53UpsertIfEnabled(
+  hostedZoneId: string,
+  batch: ReturnType<typeof aliasChange>,
+  log: Record<string, string | boolean | undefined>,
+  manualRoute53Enabled: boolean,
+) {
+  if (!manualRoute53Enabled) {
+    log.route53UpsertApplied = false;
+    log.route53UpsertSkipped =
+      "Manual failover DNS updates are disabled (dashboard toggle or ops settings); Route53 weights unchanged.";
+    return;
+  }
+  await route53UpsertWeighted(hostedZoneId, batch);
+  log.route53UpsertApplied = true;
+}
+
+function setRoute53WeightsInLog(
+  log: Record<string, string | boolean | undefined>,
+  priW: number,
+  secW: number,
+) {
+  if (log.route53UpsertApplied === true) {
+    log.route53Weights = `${priW}/${secW}`;
+  } else {
+    log.route53Weights = `unchanged (see route53UpsertSkipped) — intended ${priW}/${secW}`;
+  }
+}
+
 async function invokePredictive(region: string, name: string) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lvout-"));
   const outPath = path.join(dir, "resp.json");
@@ -284,17 +314,21 @@ export async function POST(req: Request) {
   const rSec = num(peer.restored_secondary_weight ?? "100", 100);
 
   const home = ssmHome();
-  const log: Record<string, string | boolean | undefined> = { action };
+  const manualRouteDns = await resolveManualRoute53DrFromAdmin(home);
+  const log: Record<string, string | boolean | undefined> = {
+    action,
+    manualRoute53FromAdminEnabled: manualRouteDns,
+  };
 
   try {
     switch (action) {
       case "baseline": {
         await putParam("/streamvault/demo/active_serving", "primary");
-        await route53UpsertWeighted(zone, aliasChange(peer, bPri, bSec));
+        await demoRoute53UpsertIfEnabled(zone, aliasChange(peer, bPri, bSec), log, manualRouteDns);
         const st = await stopDr(peer);
         log.stopped_secondary = st.ok;
         log.stop_message = st.message;
-        log.route53Weights = `${bPri}/${bSec}`;
+        setRoute53WeightsInLog(log, bPri, bSec);
         break;
       }
       case "pre_disaster": {
@@ -303,8 +337,8 @@ export async function POST(req: Request) {
         log.dr_instance_start = run.ok;
         if (!run.ok) return NextResponse.json({ ok: false, ...log, error: run.message }, { status: 500 });
         await putParam("/streamvault/demo/secondary_lifecycle", "warm");
-        await route53UpsertWeighted(zone, aliasChange(peer, wPri, wSec));
-        log.route53Weights = `${wPri}/${wSec}`;
+        await demoRoute53UpsertIfEnabled(zone, aliasChange(peer, wPri, wSec), log, manualRouteDns);
+        setRoute53WeightsInLog(log, wPri, wSec);
         const predict = peer.predictive_lambda_name?.trim();
         if (predict) {
           try {
@@ -326,24 +360,24 @@ export async function POST(req: Request) {
         }
         await putParam("/streamvault/demo/active_serving", "secondary");
         await putParam("/streamvault/demo/secondary_lifecycle", "active");
-        await route53UpsertWeighted(zone, aliasChange(peer, fPri, fSec));
-        log.route53Weights = `${fPri}/${fSec}`;
+        await demoRoute53UpsertIfEnabled(zone, aliasChange(peer, fPri, fSec), log, manualRouteDns);
+        setRoute53WeightsInLog(log, fPri, fSec);
         log.activeTrafficAwsRegionHint = peer.secondary_region;
         break;
       }
       case "failback": {
         await putParam("/streamvault/demo/active_serving", "primary");
         await putParam("/streamvault/demo/secondary_lifecycle", "warm");
-        await route53UpsertWeighted(zone, aliasChange(peer, rPri, rSec));
-        log.route53Weights = `${rPri}/${rSec}`;
+        await demoRoute53UpsertIfEnabled(zone, aliasChange(peer, rPri, rSec), log, manualRouteDns);
+        setRoute53WeightsInLog(log, rPri, rSec);
         break;
       }
       case "normalize": {
         await putParam("/streamvault/demo/active_serving", "primary");
-        await route53UpsertWeighted(zone, aliasChange(peer, bPri, bSec));
+        await demoRoute53UpsertIfEnabled(zone, aliasChange(peer, bPri, bSec), log, manualRouteDns);
         const st = await stopDr(peer);
         log.stopped_secondary = st.ok;
-        log.route53Weights = `${bPri}/${bSec}`;
+        setRoute53WeightsInLog(log, bPri, bSec);
         log.stop_message = st.message;
         break;
       }

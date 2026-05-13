@@ -59,11 +59,7 @@ function LoginInner() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-sv-ink text-3xl font-bold tracking-tight">Welcome back</h1>
-          <p className="text-sv-muted mt-2 text-sm leading-relaxed">
-            Use credentials from your server environment (
-            <code className="text-sv-dim">ADMIN_EMAIL</code> / <code className="text-sv-dim">ADMIN_PASSWORD</code>) or a
-            registered account.
-          </p>
+          <p className="text-sv-muted mt-2 text-sm leading-relaxed">Sign in with the email and password for your classroom account.</p>
         </div>
         <Link
           href="/register"

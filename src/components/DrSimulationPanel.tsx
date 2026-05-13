@@ -29,6 +29,10 @@ export function DrSimulationPanel({ token }: { token: string }) {
   const [loading, setLoading] = useState(false);
   const [setting, setSetting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** null = not loaded yet */
+  const [manualFailoverDnsOn, setManualFailoverDnsOn] = useState<boolean | null>(null);
+  const [manualFailoverDnsLoading, setManualFailoverDnsLoading] = useState(false);
+  const [manualFailoverDnsSaving, setManualFailoverDnsSaving] = useState(false);
 
   const poll = useCallback(async () => {
     if (!token) return;
@@ -53,6 +57,53 @@ export function DrSimulationPanel({ token }: { token: string }) {
       setLoading(false);
     }
   }, [token]);
+
+  const loadManualFailoverDnsToggle = useCallback(async () => {
+    if (!token) return;
+    setManualFailoverDnsLoading(true);
+    try {
+      const res = await fetch("/api/admin/manual-route53-dr", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      const body = (await res.json()) as { ok?: boolean; enabled?: boolean; error?: string };
+      if (res.ok && body?.ok && typeof body.enabled === "boolean") {
+        setManualFailoverDnsOn(body.enabled);
+      } else {
+        setManualFailoverDnsOn(null);
+      }
+    } catch {
+      setManualFailoverDnsOn(null);
+    } finally {
+      setManualFailoverDnsLoading(false);
+    }
+  }, [token]);
+
+  const persistManualFailoverDnsToggle = async (enabled: boolean) => {
+    if (!token) return;
+    setManualFailoverDnsSaving(true);
+    try {
+      const res = await fetch("/api/admin/manual-route53-dr", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled }),
+      });
+      const body = (await res.json()) as { ok?: boolean; enabled?: boolean; error?: string };
+      if (!res.ok || !body?.ok || typeof body.enabled !== "boolean") {
+        setErr(body.error ?? `Could not save setting (HTTP ${res.status})`);
+        return;
+      }
+      setManualFailoverDnsOn(body.enabled);
+      setErr(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setManualFailoverDnsSaving(false);
+    }
+  };
 
   const infraAction = async (
     action: string,
@@ -147,14 +198,16 @@ export function DrSimulationPanel({ token }: { token: string }) {
   useEffect(() => {
     startTransition(() => {
       void poll();
+      void loadManualFailoverDnsToggle();
     });
     const id = window.setInterval(() => {
       startTransition(() => {
         void poll();
+        void loadManualFailoverDnsToggle();
       });
     }, 8000);
     return () => clearInterval(id);
-  }, [poll]);
+  }, [poll, loadManualFailoverDnsToggle]);
 
   const s = data?.simulation;
   /** Until first snapshot, defer stress buttons except Clear (handles stray workers). */
@@ -167,19 +220,21 @@ export function DrSimulationPanel({ token }: { token: string }) {
           <p className="text-sv-muted text-sm uppercase tracking-wider">DR demo (primary admin only)</p>
           <h2 className="text-sv-ink mt-1 text-lg font-semibold">Classroom storyline</h2>
           <p className="text-sv-muted mt-2 max-w-2xl text-sm">
-            Pre‑disaster + disaster buttons first call AWS (<code className="font-mono text-[11px]">/api/admin/demo-phase</code>)
-            — start/warm DR EC2, shift Route53 weights, optional Lambda — then ramp CPU. High CPU metrics alone do{" "}
-            <span className="text-sv-ink font-medium">not</span> auto‑failover unless you enable predictive DR in
-            Terraform. Clearing load also kicks failback DNS; use “cold DR” when the story is finished.
+            Follow the storyline: simulate stress, run the failure steps, then return to normal. Turn off{' '}
+            <strong className="text-sv-muted font-medium">traffic failover</strong> below if routing should stay unchanged
+            (for example during an automated failover demo).
           </p>
         </div>
         <button
           type="button"
-          onClick={() => void poll()}
-          disabled={loading}
+          onClick={() => {
+            void poll();
+            void loadManualFailoverDnsToggle();
+          }}
+          disabled={loading || manualFailoverDnsLoading}
           className="border-sv-line text-sv-ink hover:bg-white/5 shrink-0 rounded border px-4 py-2 text-sm transition disabled:opacity-50"
         >
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading || manualFailoverDnsLoading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
@@ -189,6 +244,38 @@ export function DrSimulationPanel({ token }: { token: string }) {
             "Synthetic CPU is disabled here (typically the DR standby). Use primary admin dashboard for load."}
         </p>
       )}
+
+      <div className="border-sv-line flex flex-wrap items-start justify-between gap-4 rounded-lg border bg-black/20 px-3 py-3">
+        <div className="min-w-0 max-w-xl">
+          <p className="text-sv-ink text-sm font-medium">Manual traffic failover</p>
+          <p className="text-sv-dim mt-1 text-xs leading-relaxed">
+            Controls whether storyline steps can steer viewer traffic. When disabled, standby servers may still start, but
+            routing stays as-is unless something else manages it.
+          </p>
+        </div>
+        <label className="text-sv-muted flex shrink-0 cursor-pointer items-center gap-2.5 pt-1 text-sm">
+          <span className="select-none">
+            {manualFailoverDnsSaving
+              ? "Saving…"
+              : manualFailoverDnsLoading || manualFailoverDnsOn === null
+                ? "Checking…"
+                : manualFailoverDnsOn
+                  ? "Routing changes on"
+                  : "Routing changes off"}
+          </span>
+          <input
+            type="checkbox"
+            className="border-sv-line text-amber-500 focus:ring-amber-500/40 h-4 w-4 rounded border bg-black/40"
+            checked={manualFailoverDnsOn === true}
+            disabled={manualFailoverDnsSaving || manualFailoverDnsLoading || manualFailoverDnsOn === null}
+            onChange={(e) =>
+              startTransition(() => {
+                void persistManualFailoverDnsToggle(e.target.checked);
+              })
+            }
+          />
+        </label>
+      </div>
 
       <div className="flex flex-wrap gap-3">
         <button
